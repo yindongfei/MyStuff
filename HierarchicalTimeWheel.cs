@@ -1,4 +1,5 @@
 
+
     /// <summary>
     /// Why a timing wheel? The critical feature of timing wheels is O(1) insertion and deletion. 
     /// Timeouts rarely expire in network server software; they're hedges by software for when other expected events fail to occur. 
@@ -36,6 +37,8 @@
         private readonly List<TimedItem>[,] items = new List<TimedItem>[MaxLevel, Step];
         private int[] currentIndex = new[] { 0, 0, 0, 0, 0 };
 
+        private DateTime lastUpdateTime;
+
         /// <summary>
         /// initalize data structure and alloc memory for later useage.
         /// </summary>
@@ -48,6 +51,8 @@
                     items[i, j] = new List<TimedItem>(128);
                 }
             }
+
+            lastUpdateTime = DateTime.Now;
         }
 
         /// <summary>
@@ -103,6 +108,21 @@
         }
 
         /// <summary>
+        /// Update the Time wheel according to datetime, no matter when this is called, time wheel will advance to curruent tick.
+        /// </summary>
+        public void Update()
+        {
+            var now = DateTime.Now;
+            var duration = (now - lastUpdateTime).TotalMilliseconds/MinTime;
+            for (int i = 0; i < duration; i++)
+            {
+                Advance();
+            }
+
+            lastUpdateTime = lastUpdateTime.AddMilliseconds(duration*10);
+        }
+
+        /// <summary>
         /// advance the timer at MinTime in millisecond, this method should be called every MinTime millisecond. 
         /// </summary>
         public void Advance()
@@ -121,38 +141,20 @@
             }
 
             items[0, currentIndex[0]].Clear();
-
             currentIndex[0]++;
-            if (currentIndex[0] >= Step)
+
+            for (int i = 1; i < MaxLevel; i++)
             {
-                currentIndex[0] = 0;
-                currentIndex[1]++;
-                currentIndex[1] %= Step;
-                PutItemsDown(1);
-                if (currentIndex[1] >= Step)
+                if (currentIndex[i - 1] >= Step)
                 {
-                    currentIndex[1] = 1;
-                    currentIndex[2]++;
-                    currentIndex[2] %= Step;
-                    PutItemsDown(2);
-                    if (currentIndex[2] >= Step)
-                    {
-                        currentIndex[2] = 1;
-                        currentIndex[3]++;
-                        currentIndex[3] %= Step;
-                        PutItemsDown(3);
-                        if (currentIndex[3] >= Step)
-                        {
-                            currentIndex[3] = 1;
-                            currentIndex[4]++;
-                            currentIndex[4] %= Step;
-                            PutItemsDown(4);
-                            if (currentIndex[4] >= Step)
-                            {
-                                //...
-                            }
-                        }
-                    }
+                    currentIndex[i - 1] = i == 1 ? 0 : 1;
+                    currentIndex[i] ++;
+                    currentIndex[i] %= Step;
+                    PutItemsDown(i);
+                }
+                else
+                {
+                    break;
                 }
             }
         }
