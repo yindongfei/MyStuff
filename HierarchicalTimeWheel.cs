@@ -1,5 +1,9 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
-
+namespace Scorpion
+{
     /// <summary>
     /// Why a timing wheel? The critical feature of timing wheels is O(1) insertion and deletion. 
     /// Timeouts rarely expire in network server software; they're hedges by software for when other expected events fail to occur. 
@@ -26,10 +30,10 @@
 
         private static readonly long[] Duration = new[]
         {
-            (long) MinTime, 
-            (long) MinTime*Step, 
-            (long) MinTime*Step*Step, 
-            (long) MinTime*Step*Step*Step, 
+            (long) MinTime,
+            (long) MinTime*Step,
+            (long) MinTime*Step*Step,
+            (long) MinTime*Step*Step*Step,
             (long) MinTime*Step*Step*Step*Step,
             (long) MinTime*Step*Step*Step*Step*Step
         };
@@ -75,14 +79,14 @@
         /// <returns></returns>
         public object Add(long t, Action act)
         {
-            if(t >= Duration[MaxLevel])
+            if (t >= Duration[MaxLevel])
                 throw new ArgumentOutOfRangeException("t");
 
             var level = 0;
 
             if (t < Duration[0])
             {
-                var item = new TimedItem {Duration = t, Action = act};
+                var item = new TimedItem { Duration = t, Action = act };
                 items[0, currentIndex[0]].Add(item);
                 return item;
             }
@@ -102,7 +106,7 @@
                     Duration = t,
                     Action = act
                 };
-                items[level, currentIndex[level] + (int) (t/Duration[level])%Step].Add(item);
+                items[level, (currentIndex[level] + (int)(t / Duration[level])) % Step].Add(item);
                 return item;
             }
         }
@@ -113,13 +117,13 @@
         public void Update()
         {
             var now = DateTime.Now;
-            var duration = (now - lastUpdateTime).TotalMilliseconds/MinTime;
+            var duration = (int)((now - lastUpdateTime).TotalMilliseconds) / MinTime;
             for (int i = 0; i < duration; i++)
             {
                 Advance();
             }
 
-            lastUpdateTime = lastUpdateTime.AddMilliseconds(duration*10);
+            lastUpdateTime = lastUpdateTime.AddMilliseconds(duration * MinTime);
         }
 
         /// <summary>
@@ -129,15 +133,19 @@
         {
             foreach (var item in items[0, currentIndex[0]])
             {
-                //try
-                //{
-                if (item.Enable)
-                    item.Action();
-                //}
-                //catch (Exception ex)
-                //{
-                //    Console.WriteLine(ex.ToString());
-                //}
+                try
+                {
+                    if (item.Enable)
+                        item.Action();
+                }
+                catch (Exception ex)
+                {
+                    Utility.Logger.WarnException("HierarchicalTimeWheel Advance error.", ex);
+                }
+                finally
+                {
+                    item.Enable = false;
+                }
             }
 
             items[0, currentIndex[0]].Clear();
@@ -148,7 +156,29 @@
                 if (currentIndex[i - 1] >= Step)
                 {
                     currentIndex[i - 1] = i == 1 ? 0 : 1;
-                    currentIndex[i] ++;
+                    currentIndex[i]++;
+                    currentIndex[i] %= Step;
+                    PutItemsDown(i);
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        public void UpdateWithoutExecute(List<Action> acts)
+        {
+            acts.AddRange(items[0, currentIndex[0]].Where(i => i.Enable).Select(i => i.Action));
+            items[0, currentIndex[0]].Clear();
+            currentIndex[0]++;
+
+            for (int i = 1; i < MaxLevel; i++)
+            {
+                if (currentIndex[i - 1] >= Step)
+                {
+                    currentIndex[i - 1] = i == 1 ? 0 : 1;
+                    currentIndex[i]++;
                     currentIndex[i] %= Step;
                     PutItemsDown(i);
                 }
@@ -176,8 +206,11 @@
             int toLevel = fromLevel - 1;
             foreach (var timedItem in items[fromLevel, fromIndex])
             {
-                items[toLevel, (timedItem.Duration/Duration[toLevel])%Step].Add(timedItem);
+                items[toLevel, (timedItem.Duration / Duration[toLevel]) % Step].Add(timedItem);
             }
             items[fromLevel, fromIndex].Clear();
         }
     }
+
+}
+
