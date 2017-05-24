@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -28,19 +28,12 @@ namespace Scorpion
         private const int Step = 256;
         private const int MaxLevel = 5;
 
-        private static readonly long[] Duration = new[]
-        {
-            (long) MinTime,
-            (long) MinTime*Step,
-            (long) MinTime*Step*Step,
-            (long) MinTime*Step*Step*Step,
-            (long) MinTime*Step*Step*Step*Step,
-            (long) MinTime*Step*Step*Step*Step*Step
-        };
-
+        private const long MaxDuration = (long)1 << (MaxLevel << 3);
+        private readonly long[] Mask = new[] { 0xFF, 0xFF00, 0xFF0000, 0xFF000000, 0xFF00000000 };
         private readonly List<TimedItem>[,] items = new List<TimedItem>[MaxLevel, Step];
         private int[] currentIndex = new[] { 0, 0, 0, 0, 0 };
 
+        public long elapsedTick = 0;
         private DateTime lastUpdateTime;
 
         /// <summary>
@@ -67,8 +60,8 @@ namespace Scorpion
         /// <returns>the added timer, will be useful if the timer will canceled later.</returns>
         public object Add(DateTime t, Action act)
         {
-            var ms = (long)(t - DateTime.Now).TotalMilliseconds;
-            return Add(ms, act);
+            var tick = (long)((t - DateTime.Now).TotalMilliseconds) / MinTime + elapsedTick;
+            return AddItem(tick, act);
         }
 
         /// <summary>
@@ -79,25 +72,30 @@ namespace Scorpion
         /// <returns></returns>
         public object Add(long t, Action act)
         {
-            if (t >= Duration[MaxLevel])
+            var tick = (long)t / MinTime  + elapsedTick;
+            return AddItem(tick, act);
+        }
+
+
+        private object AddItem(long t, Action act)
+        {
+            if (t >= MaxDuration)
                 throw new ArgumentOutOfRangeException("t");
 
-            var level = 0;
+            var level = MaxLevel - 1;
 
-            if (t < Duration[0])
+            if (t <= elapsedTick)
             {
                 var item = new TimedItem { Duration = t, Action = act };
                 items[0, currentIndex[0]].Add(item);
                 return item;
             }
 
-            for (int i = 0; i < MaxLevel; i++)
+            var slot = t & Mask[level];
+            while (slot <= currentIndex[level])
             {
-                if (t >= Duration[i] && t < Duration[i + 1])
-                {
-                    level = i;
-                    break;
-                }
+                level--;
+                slot = (t & Mask[level]) >> (level<<3);
             }
 
             {
@@ -106,7 +104,7 @@ namespace Scorpion
                     Duration = t,
                     Action = act
                 };
-                items[level, (currentIndex[level] + (int)(t / Duration[level])) % Step].Add(item);
+                items[level, slot].Add(item);
                 return item;
             }
         }
@@ -118,6 +116,7 @@ namespace Scorpion
         {
             var now = DateTime.Now;
             var duration = (int)((now - lastUpdateTime).TotalMilliseconds) / MinTime;
+            //var duration = 1;
             for (int i = 0; i < duration; i++)
             {
                 Advance();
@@ -131,8 +130,10 @@ namespace Scorpion
         /// </summary>
         public void Advance()
         {
-            foreach (var item in items[0, currentIndex[0]])
+            var list = items[0, currentIndex[0]];
+            for (int i = 0; i < list.Count; i++)
             {
+                var item = list[i];
                 try
                 {
                     if (item.Enable)
@@ -150,42 +151,36 @@ namespace Scorpion
 
             items[0, currentIndex[0]].Clear();
             currentIndex[0]++;
+            elapsedTick++;
 
-            for (int i = 1; i < MaxLevel; i++)
+            if (currentIndex[0] >= Step)
             {
-                if (currentIndex[i - 1] >= Step)
-                {
-                    currentIndex[i - 1] = i == 1 ? 0 : 1;
-                    currentIndex[i]++;
-                    currentIndex[i] %= Step;
-                    PutItemsDown(i);
-                }
-                else
-                {
-                    break;
-                }
+                Reshape(0);
             }
         }
 
+        private void Reshape(int level)
+        {
+            if(currentIndex[level] >= Step)
+            {
+                currentIndex[level + 1]++;
+                currentIndex[level] = 0;
+                Reshape(level + 1);
+            }
+
+            if (level > 0)
+                PutItemsDown(level);
+        }
         public void UpdateWithoutExecute(List<Action> acts)
         {
             acts.AddRange(items[0, currentIndex[0]].Where(i => i.Enable).Select(i => i.Action));
             items[0, currentIndex[0]].Clear();
             currentIndex[0]++;
+            elapsedTick++;
 
-            for (int i = 1; i < MaxLevel; i++)
+            if (currentIndex[0] >= Step)
             {
-                if (currentIndex[i - 1] >= Step)
-                {
-                    currentIndex[i - 1] = i == 1 ? 0 : 1;
-                    currentIndex[i]++;
-                    currentIndex[i] %= Step;
-                    PutItemsDown(i);
-                }
-                else
-                {
-                    break;
-                }
+                Reshape(0);
             }
         }
 
@@ -204,9 +199,12 @@ namespace Scorpion
         {
             int fromIndex = currentIndex[fromLevel];
             int toLevel = fromLevel - 1;
+            long mask = Mask[toLevel];
+            int shift = (toLevel << 3);
             foreach (var timedItem in items[fromLevel, fromIndex])
             {
-                items[toLevel, (timedItem.Duration / Duration[toLevel]) % Step].Add(timedItem);
+                var slot = (timedItem.Duration & mask) >> shift;
+                items[toLevel, slot].Add(timedItem);
             }
             items[fromLevel, fromIndex].Clear();
         }
