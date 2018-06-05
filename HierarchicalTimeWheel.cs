@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Scorpion
+namespace Network
 {
     /// <summary>
     /// Why a timing wheel? The critical feature of timing wheels is O(1) insertion and deletion. 
@@ -34,7 +34,7 @@ namespace Scorpion
         private int[] currentIndex = new[] { 0, 0, 0, 0, 0 };
 
         public long elapsedTick = 0;
-        private DateTime lastUpdateTime;
+        private DateTime firstUpdateTime;
 
         /// <summary>
         /// initalize data structure and alloc memory for later useage.
@@ -49,7 +49,7 @@ namespace Scorpion
                 }
             }
 
-            lastUpdateTime = DateTime.Now;
+            firstUpdateTime = DateTime.Now;
         }
 
         /// <summary>
@@ -72,7 +72,7 @@ namespace Scorpion
         /// <returns></returns>
         public object Add(long t, Action act)
         {
-            var tick = (long)t / MinTime  + elapsedTick;
+            var tick = (long)t / MinTime + elapsedTick;
             return AddItem(tick, act);
         }
 
@@ -95,7 +95,7 @@ namespace Scorpion
             while (slot <= currentIndex[level])
             {
                 level--;
-                slot = (t & Mask[level]) >> (level<<3);
+                slot = (t & Mask[level]) >> (level << 3);
             }
 
             {
@@ -115,14 +115,12 @@ namespace Scorpion
         public void Update()
         {
             var now = DateTime.Now;
-            var duration = (int)((now - lastUpdateTime).TotalMilliseconds) / MinTime;
+            var duration = (int)((now - firstUpdateTime).TotalMilliseconds) / MinTime - elapsedTick;
             //var duration = 1;
             for (int i = 0; i < duration; i++)
             {
                 Advance();
             }
-
-            lastUpdateTime = lastUpdateTime.AddMilliseconds(duration * MinTime);
         }
 
         /// <summary>
@@ -141,7 +139,7 @@ namespace Scorpion
                 }
                 catch (Exception ex)
                 {
-                    Utility.Logger.WarnException("HierarchicalTimeWheel Advance error.", ex);
+                    throw ex;
                 }
                 finally
                 {
@@ -161,7 +159,7 @@ namespace Scorpion
 
         private void Reshape(int level)
         {
-            if(currentIndex[level] >= Step)
+            if (currentIndex[level] >= Step)
             {
                 currentIndex[level + 1]++;
                 currentIndex[level] = 0;
@@ -211,4 +209,3 @@ namespace Scorpion
     }
 
 }
-
